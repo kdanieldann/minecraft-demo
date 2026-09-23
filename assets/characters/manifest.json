@@ -1,0 +1,11 @@
+{
+  "player": true,
+  "blockyMotions": {
+    "idle": "xbot_idle.glb",
+    "walk": "xbot_walk.glb",
+    "run": "xbot_run.glb",
+    "wave": "xbot_wave.glb",
+    "mine": { "file": "xbot_mine.glb", "loop": [0.2, 3.67] }
+  },
+  "characters": []
+}

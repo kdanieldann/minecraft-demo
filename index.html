@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Voxel World</title>
+<style>
+  :root { --ui: rgba(12, 14, 18, 0.62); --line: rgba(255, 255, 255, 0.14); --txt: #f3f1ea; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--txt);
+    font: 14px/1.45 ui-sans-serif, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; user-select: none; }
+  #game canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; transition: opacity .25s; }
+  #hud.dim #crosshair { opacity: 0; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; mix-blend-mode: difference; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
+  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after { top: 10px; left: 0; height: 2px; width: 22px; }
+  #hotbar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 5px;
+    background: var(--ui); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(6px); }
+  .slot { position: relative; width: 54px; height: 54px; display: grid; place-items: center; border-radius: 7px; border: 2px solid transparent; }
+  .slot img { width: 46px; height: 46px; pointer-events: none; filter: drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
+  .slot span { position: absolute; left: 4px; top: 1px; font-size: 10px; opacity: .55; }
+  .slot.sel { border-color: #fff; background: rgba(255,255,255,.12); }
+  #blockname { position: absolute; bottom: 86px; left: 50%; transform: translateX(-50%); font-weight: 600; text-shadow: 0 1px 3px #000; transition: opacity .4s; }
+  #clock { position: absolute; top: 12px; right: 14px; padding: 4px 10px; background: var(--ui); border: 1px solid var(--line); border-radius: 8px; font-variant-numeric: tabular-nums; }
+  #toast { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); padding: 6px 14px; background: var(--ui); border-radius: 8px; opacity: 0; transition: opacity .3s; }
+  #debug { position: absolute; top: 12px; left: 14px; padding: 8px 10px; background: var(--ui); border-radius: 8px; white-space: pre; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(0,0,0,.25), rgba(0,0,0,.7)); }
+  .panel { width: min(760px, 92vw); padding: 26px 30px; background: rgba(14, 16, 20, .78); border: 1px solid var(--line); border-radius: 16px; backdrop-filter: blur(10px); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  h1 { margin: 0 0 2px; font-size: 30px; letter-spacing: .5px; }
+  .sub { margin: 0 0 18px; opacity: .7; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; opacity: .55; margin: 0 0 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  td { padding: 3px 0; } td:first-child { width: 50%; white-space: nowrap; }
+  kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; font: 12px ui-monospace, Menlo, monospace; background: rgba(255,255,255,.06); text-align: center; }
+  label.row { display: grid; grid-template-columns: 112px 1fr 72px; align-items: center; gap: 10px; margin: 7px 0; font-size: 13px; }
+  label.chk { display: inline-flex; gap: 6px; align-items: center; margin: 6px 14px 0 0; font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: #8fd16a; }
+  select { background: #1c2026; color: var(--txt); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  #play { margin-top: 20px; width: 100%; padding: 13px; font-size: 16px; font-weight: 700; color: #10200a; background: linear-gradient(#a6e07c, #6fb548);
+    border: 0; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 0 #3d7a24; }
+  #play:disabled { filter: grayscale(.8) brightness(.7); cursor: progress; }
+  #loading { margin-top: 12px; height: 6px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; }
+  #loadbar { height: 100%; width: 0; background: #8fd16a; transition: width .2s; }
+  #inventory { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.45); }
+  .inv { width: min(620px, 94vw); }
+  .inv h2 { display: flex; justify-content: space-between; }
+  #invname { text-transform: none; letter-spacing: 0; opacity: 1; font-weight: 600; font-size: 13px; }
+  #invgrid { display: grid; grid-template-columns: repeat(9, 54px); gap: 5px; justify-content: center; padding: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 10px; }
+  #invgrid .slot { cursor: pointer; background: rgba(255,255,255,.05); }
+  #invgrid .slot:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.5); }
+  #invhotbar { display: flex; gap: 5px; justify-content: center; margin-top: 14px; padding: 6px; border-radius: 10px; background: rgba(0,0,0,.3); }
+  #invhotbar .slot { cursor: pointer; }
+  .hint { margin-top: 10px; font-size: 12px; opacity: .6; text-align: center; }
+  #charsrc { margin-top: 10px; font-size: 12px; opacity: .6; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud" class="dim">
+  <div id="crosshair"></div>
+  <div id="blockname"></div>
+  <div id="hotbar"></div>
+  <div id="clock">--:--</div>
+  <div id="toast"></div>
+  <div id="debug" hidden></div>
+</div>
+<div id="inventory" hidden>
+  <div class="panel inv">
+    <h2>Inventory <span id="invname"></span></h2>
+    <div id="invgrid"></div>
+    <div id="invhotbar"></div>
+    <div class="hint">Click an item to put it in the selected slot · hover an item and press 1–9 · drag onto a slot · <kbd>E</kbd> to close</div>
+  </div>
+</div>
+<div id="overlay">
+  <div class="panel">
+    <h1>Voxel World</h1>
+    <p class="sub">Minecraft in your browser — physically based sky · volumetric-style clouds · shadows · water reflections &amp; caustics · god rays · PBR blocks</p>
+    <div class="cols">
+      <div>
+        <h2>Controls</h2>
+        <table>
+          <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Jump / swim up</td></tr>
+          <tr><td><kbd>Shift</kbd></td><td>Sprint (descend while flying)</td></tr>
+          <tr><td>Double-tap <kbd>Space</kbd> / <kbd>F</kbd></td><td>Toggle flight</td></tr>
+          <tr><td>Left / Right click</td><td>Break / place block</td></tr>
+          <tr><td>Middle click</td><td>Pick block</td></tr>
+          <tr><td><kbd>1</kbd>–<kbd>9</kbd> / wheel</td><td>Select hotbar slot</td></tr>
+          <tr><td><kbd>E</kbd></td><td>Inventory</td></tr>
+          <tr><td><kbd>V</kbd></td><td>First / third person</td></tr>
+          <tr><td><kbd>T</kbd> · <kbd>[</kbd> <kbd>]</kbd> · <kbd>P</kbd></td><td>Fast time · ±1 hour · pause</td></tr>
+          <tr><td><kbd>F3</kbd> · <kbd>Esc</kbd></td><td>Debug info · menu</td></tr>
+        </table>
+      </div>
+      <div>
+        <h2>Graphics</h2>
+        <label class="row">Render distance <input id="rd" type="range" min="3" max="14" step="1" value="9" /><span id="rdVal"></span></label>
+        <label class="row">Time of day <input id="tod" type="range" min="0" max="23.99" step="0.05" value="7.4" /><span id="todVal"></span></label>
+        <label class="row">Resolution <input id="res" type="range" min="0.5" max="2" step="0.25" value="1" /><span id="resVal"></span></label>
+        <label class="row">Shadows <select id="shadowq"><option value="0">Off</option><option value="1024">Low</option><option value="2048" selected>Medium</option><option value="4096">High</option></select><span></span></label>
+        <label class="chk"><input id="refl" type="checkbox" checked /> Real-time water reflections</label>
+        <label class="chk"><input id="god" type="checkbox" checked /> God rays</label>
+        <label class="chk"><input id="bloomchk" type="checkbox" checked /> Bloom</label>
+        <div id="charsrc">Characters: built-in blocky people (no PINOC characters found)</div>
+      </div>
+    </div>
+    <button id="play" disabled>Generating world…</button>
+    <div id="loading"><div id="loadbar"></div></div>
+  </div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
