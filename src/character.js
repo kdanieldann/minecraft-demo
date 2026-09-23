@@ -33,6 +33,20 @@ function makeMat(U, map, color) {
   return m;
 }
 
+// A pixel-art wooden crate, the size a blocky character carries (≈0.5 m).
+let crateTex = null;
+export function makeCrateMesh(U, size = 9 * PX) {
+  crateTex ??= pixCanvas(8, 8, (c) => {
+    c.fillStyle = '#6e4a22'; c.fillRect(0, 0, 8, 8);
+    c.fillStyle = '#a4743c'; c.fillRect(1, 1, 6, 6);
+    c.fillStyle = '#b8864a'; c.fillRect(2, 2, 4, 4);
+    c.fillStyle = '#6e4a22'; c.fillRect(1, 3, 6, 1);
+  });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), makeMat(U, crateTex));
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+
 export class BlockyCharacter {
   constructor(pal, U) {
     this.root = new THREE.Group();
@@ -95,39 +109,92 @@ export class BlockyCharacter {
   }
 
   // Loop a full-body activity clip over locomotion (null to return to idle/walk/run).
-  setActivity(name) { this.activity = name && this.extras?.[name] ? name : null; }
+  setActivity(name) { this.once = null; this.activity = name && this.extras?.[name] ? name : null; }
 
-  // A blocky pickaxe gripped two-handed: the handle continues the arm's line so an overhead
-  // swing lands the head on the ground in front; the head sits crosswise at the far end.
-  holdPickaxe(U) {
-    if (this.pickaxe) return;
-    const wood = makeMat(U, null, 0x8a5a2b), iron = makeMat(U, null, 0x9aa4ad);
+  // Play [from, to] of an activity clip once (backwards with reverse), then loop `after`
+  // (an activity name, or null for locomotion) and call onDone.
+  playOnce(name, { from = 0, to, reverse = false, after = null, onDone } = {}) {
+    const a = this.extras?.[name];
+    if (!a) { onDone?.(); return; }
+    to ??= a.getClip().duration;
+    this.once = { name, from, to, reverse, after, onDone, t: reverse ? to : from };
+    this.activity = name;
+    a.paused = true; a.time = this.once.t;
+  }
+
+  // Blocky tools and props. The two-handed tools continue the arm's line so a swing lands the
+  // head in front; the sword points forward-up out of the fist; the bow's stave lies along
+  // `up` (a direction in the left arm's own frame — world-up at full draw); the crate is
+  // carried against the chest. Returns the prop so it can be shown or hidden.
+  hold(kind, U, { up } = {}) {
+    this.props ??= {};
+    if (this.props[kind]) return this.props[kind];
+    const wood = makeMat(U, null, 0x8a5a2b), iron = makeMat(U, null, 0x9aa4ad), dark = makeMat(U, null, 0x4a3320);
     const g = new THREE.Group();
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(1.4 * PX, 14 * PX, 1.4 * PX), wood);
-    handle.position.y = -5 * PX;
-    const head = new THREE.Mesh(new THREE.BoxGeometry(1.6 * PX, 2 * PX, 11 * PX), iron);
-    head.position.set(0, -11.5 * PX, 1.5 * PX);
-    for (const m of [handle, head]) { m.castShadow = true; g.add(m); }
+    const add = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w * PX, h * PX, d * PX), mat); m.position.set(x * PX, y * PX, z * PX); m.castShadow = true; g.add(m); return m; };
+    let parent = this.armR;
     g.position.set(0, -10.5 * PX, 0);
-    this.armR.add(g);
-    this.pickaxe = g;
+    if (kind === 'pickaxe') { add(1.4, 14, 1.4, wood, 0, -5, 0); add(1.6, 2, 11, iron, 0, -11.5, 1.5); }
+    else if (kind === 'axe') { add(1.4, 14, 1.4, wood, 0, -5, 0); add(1.4, 5, 5, iron, 0, -10, 2.6); }
+    else if (kind === 'hoe') { add(1.4, 16, 1.4, wood, 0, -6, 0); add(1.4, 1.6, 5, iron, 0, -13.5, 2.6); }
+    else if (kind === 'sword') {
+      add(1.2, 1.2, 3, dark, 0, 0, -1); add(5, 1.2, 1.2, dark, 0, 0, 1); add(1.2, 1.2, 15, iron, 0, 0, 9);
+      g.rotation.x = -0.7; // tip up
+    } else if (kind === 'bow') {
+      parent = this.armL;
+      add(1.2, 18, 1.2, wood, 0, 0, 0); add(1.2, 3, 1.2, wood, 0, 9, -1); add(1.2, 3, 1.2, wood, 0, -9, -1);
+      add(0.4, 22, 0.4, makeMat(U, null, 0xe8e2d0), 0, 0, -2.4);
+      if (up) g.quaternion.setFromUnitVectors(_Y, up.clone().normalize());
+    } else if (kind === 'box') {
+      parent = this.rig;
+      g.add(makeCrateMesh(U));
+      g.position.set(0, 17 * PX, 7.5 * PX);
+    }
+    parent.add(g);
+    this.props[kind] = g;
+    return g;
+  }
+  holdPickaxe(U) { return this.hold('pickaxe', U); }
+
+  // Clip events ({ name, t }) crossed between p and t; `loop` counts a wrap past the end.
+  fireEvents(clip, p, t, loop) {
+    if (t === p || !this.onEvent) return;
+    for (const e of clip.userData?.events || []) {
+      const h = e.t;
+      const hit = t > p ? p < h && h <= t : loop ? h > p || h <= t : t <= h && h < p;
+      if (hit) this.onEvent(e.name, { reverse: !loop && t < p });
+    }
   }
 
   update(dt, speed, headYaw = 0) {
     if (this.mixer) {
+      const once = this.once;
+      if (once) { // one-shots are driven by hand so they can run backwards and stop exactly
+        const a = this.extras[once.name], prev = once.t;
+        once.t = clamp(once.t + (once.reverse ? -dt : dt), once.from, once.to);
+        a.time = once.t;
+        this.fireEvents(a.getClip(), prev, once.t, false);
+        if (once.t === (once.reverse ? once.from : once.to)) {
+          this.once = null; a.paused = false;
+          this.activity = once.after && this.extras[once.after] ? once.after : null;
+          once.onDone?.();
+        }
+      }
       let busy = 0;
       for (const [k, a] of Object.entries(this.extras)) {
         const cur = a.getEffectiveWeight(), want = k === this.activity ? 1 : 0;
         const w = cur + (want - cur) * Math.min(1, dt * 6);
         a.setEffectiveWeight(w); busy += w;
       }
+      const act = this.activity && !this.once && this.extras[this.activity];
+      if (act) { // a moving activity (carry walk) keeps its cadence matched to ground speed
+        const nat = act.getClip().userData?.speed || 0;
+        act.setEffectiveTimeScale(nat > 0.2 && speed > 0.2 ? clamp(speed / nat, 0.6, 1.8) : 1);
+      }
       driveLocomotion(this, dt, speed, Math.max(0, 1 - busy));
-      // fire onStrike as the activity clip passes a strike (see findStrikes), wrap-around included
-      const act = this.activity && this.extras[this.activity];
-      if (act && this.onStrike) {
-        const t = act.time, p = this.lastActT ?? t, hits = act.getClip().userData?.strikes || [];
-        const crossed = (h) => (p < t ? p < h && h <= t : h > p || h <= t);
-        if (t !== p && act.getEffectiveWeight() > 0.5 && hits.some(crossed)) this.onStrike();
+      if (act && act.getEffectiveWeight() > 0.5) {
+        const t = act.time;
+        this.fireEvents(act.getClip(), this.lastActT ?? t, t, true);
         this.lastActT = t;
       } else this.lastActT = undefined;
       this.look += (headYaw - this.look) * Math.min(1, dt * 5);
@@ -309,11 +376,18 @@ function bakeBlockyClip(scene, clip, name) {
 
   const mixer = new THREE.AnimationMixer(scene);
   const action = mixer.clipAction(clip).play();
+  // Some captures face -Z (e.g. Carry Object Walk Forward). Turn every clip so the hips face +Z
+  // on the first frame, like the blocky rig.
+  action.time = 0; mixer.update(0); scene.updateMatrixWorld(true);
+  const hipSide = p(B.lLeg).sub(p(B.rLeg)); hipSide.y = 0;
+  const face = new THREE.Vector3().crossVectors(hipSide.normalize(), _Y);
+  const facing = new THREE.Quaternion().setFromAxisAngle(_Y, -Math.atan2(face.x, face.z));
   const n = Math.max(2, Math.round(clip.duration * MOCAP_FPS) + 1);
   const times = new Float32Array(n);
   const parts = { head: [], body: [], armL: [], armR: [], legL: [], legR: [] };
   const prev = {};
   const push = (part, q) => { // keep hemispheres consistent so interpolation never takes the long way
+    q.premultiply(facing);
     if (prev[part] && prev[part].dot(q) < 0) q.set(-q.x, -q.y, -q.z, -q.w);
     prev[part] = q; parts[part].push(q.x, q.y, q.z, q.w);
   };
@@ -343,6 +417,14 @@ function bakeBlockyClip(scene, clip, name) {
   return out;
 }
 
+// Rotation (character space) of a baked part at time t.
+export function limbQuat(clip, part, t) {
+  const track = clip.tracks.find((k) => k.name === `${part}.quaternion`);
+  return new THREE.Quaternion().fromArray(track.createInterpolant().evaluate(t)).normalize();
+}
+// Direction (character space) a baked limb points at time t, e.g. to aim an archer's bow arm.
+export function limbDir(clip, part, t) { return DOWN.clone().applyQuaternion(limbQuat(clip, part, t)); }
+
 // Moments a two-handed swing bottoms out: both arms at their lowest after having been raised
 // overhead (e.g. a pickaxe landing). Clips without such a swing return none.
 function findStrikes(clip) {
@@ -360,13 +442,15 @@ function findStrikes(clip) {
   return out;
 }
 
-// files: { role: "clip.glb" | { file, loop: [fromSec, toSec] } } under assets/characters.
-// `loop` trims the clip to a span whose ends match, for clips that don't loop end-to-start.
+// files: { role: "clip.glb" | { file, loop, strikes, events } } under assets/characters.
+// `loop` [fromSec, toSec] trims the clip to a span whose ends match; `strikes` overrides the
+// detected swing impacts; `events` adds named moments { name: sec }.
+// Times are in the trimmed clip. Every strike becomes an event named "strike".
 // Resolves to baked clips or null.
 export async function loadBlockyMotions(files) {
   const loader = new GLTFLoader();
   const entries = await Promise.all(Object.entries(files || {}).map(async ([role, spec]) => {
-    const { file, loop } = typeof spec === 'string' ? { file: spec } : spec;
+    const { file, loop, strikes, events } = typeof spec === 'string' ? { file: spec } : spec;
     try {
       const gltf = await loader.loadAsync(`assets/characters/${file}`);
       if (!gltf.animations.length) throw new Error('no animation in file');
@@ -376,7 +460,11 @@ export async function loadBlockyMotions(files) {
         clip = THREE.AnimationUtils.subclip(clip, role, Math.round(loop[0] * MOCAP_FPS), Math.round(loop[1] * MOCAP_FPS), MOCAP_FPS);
         clip.userData = userData;
       }
-      clip.userData.strikes = findStrikes(clip);
+      clip.userData.strikes = strikes ?? findStrikes(clip);
+      clip.userData.events = [
+        ...clip.userData.strikes.map((t) => ({ name: 'strike', t })),
+        ...Object.entries(events || {}).map(([name, t]) => ({ name, t })),
+      ];
       return [role, clip];
     } catch (e) { console.warn('Motion failed to load', file, e); return null; }
   }));
@@ -414,31 +502,47 @@ export class NPC {
     }
     return true;
   }
-  mine(yaw) { this.mode = 'mine'; this.yaw = yaw; this.char.setActivity?.('mine'); }
+  // Stay at a post facing `yaw`. `routine(dt, playerPos, playing)` runs each frame and may set
+  // wantYaw (turn toward), speed / pos (walk somewhere) and drive the character's clips.
+  station(yaw, routine = null) { this.mode = 'station'; this.yaw = this.wantYaw = yaw; this.routine = routine; this.target = null; this.speed = 0; }
+  // Loop one activity clip at a post (mining, chopping, dancing...).
+  work(activity, yaw) { this.station(yaw); this.char.setActivity?.(activity); }
+  mine(yaw) { this.work('mine', yaw); }
   // Stationary modes: gravity, facing, activity clip; returns false once back to wandering.
   updateStationary(dt, playerPos, playing) {
     if (this.mode === 'greet') {
       if (playing) this.greetLeft -= dt;
       if (this.greetLeft <= 0) { this.mode = 'wander'; this.char.setActivity?.(null); this.idle = 0.8; return false; }
-      if (playerPos) {
-        const want = Math.atan2(playerPos.x - this.pos.x, playerPos.z - this.pos.z);
-        let dy = want - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-        this.yaw += dy * Math.min(1, dt * 5);
-      }
+      if (playerPos) this.wantYaw = Math.atan2(playerPos.x - this.pos.x, playerPos.z - this.pos.z);
+    } else {
+      this.speed = 0;
+      this.routine?.(dt, playerPos, playing);
     }
-    const g = this.world.surfaceY(Math.floor(this.pos.x), Math.floor(this.pos.z), Math.floor(this.pos.y) + 1);
+    if (this.wantYaw !== undefined) {
+      let dy = this.wantYaw - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.yaw += dy * Math.min(1, dt * 5);
+    }
+    const g = this.world.surfaceY(Math.floor(this.pos.x), Math.floor(this.pos.z), Math.floor(this.pos.y) + 2);
     this.vy -= 25 * dt; this.pos.y += this.vy * dt;
     if (this.pos.y <= g) { this.pos.y = g; this.vy = 0; }
-    this.speed = 0;
     this.char.root.position.copy(this.pos);
     this.char.root.rotation.y = this.yaw;
     let headYaw = 0;
-    if (this.mode === 'mine' && playerPos && this.pos.distanceTo(playerPos) < 6) {
+    if (this.mode === 'station' && this.lookAtPlayer !== false && playerPos && this.pos.distanceTo(playerPos) < 6) {
       const a = Math.atan2(playerPos.x - this.pos.x, playerPos.z - this.pos.z) - this.yaw;
       headYaw = Math.max(-1.1, Math.min(1.1, Math.atan2(Math.sin(a), Math.cos(a))));
     }
-    this.char.update(dt, 0, headYaw);
+    this.char.update(dt, this.speed, headYaw);
     return true;
+  }
+  // Walk straight toward p at `speed` m/s (stations use this to fetch and carry); true on arrival.
+  stepToward(p, speed, dt) {
+    const dx = p.x - this.pos.x, dz = p.z - this.pos.z, d = Math.hypot(dx, dz);
+    if (d < 0.15) return true;
+    this.wantYaw = Math.atan2(dx, dz);
+    const s = Math.min(d, speed * dt);
+    this.pos.x += (dx / d) * s; this.pos.z += (dz / d) * s; this.speed = speed;
+    return false;
   }
   pickTarget() {
     for (let i = 0; i < 6; i++) {

@@ -9,6 +9,7 @@ import { SkySystem } from './sky.js';
 import { PostFX } from './post.js';
 import { Player } from './player.js';
 import { BlockyCharacter, GLTFCharacter, NPC, PALETTES, loadManifest, loadGLTFTemplates, loadBlockyMotions } from './character.js';
+import { stageVillage, updateArrows } from './village.js';
 
 const $ = (id) => document.getElementById(id);
 const settings = { renderDistance: 9, shadows: 2048, reflections: true, godrays: true, bloom: true, pixelRatio: Math.min(window.devicePixelRatio, 1.5) };
@@ -429,6 +430,10 @@ async function spawnCharacters() {
       }
     }
   }
+  if (motions && !gltfTemplates.length) { // blocky people with PINOC clips: a village where everyone has a job
+    stageVillage({ world, scene, player, npcs, motions, U, burst });
+    return;
+  }
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2 + 0.4, d = 6 + i * 2;
     const x = Math.floor(player.pos.x + Math.cos(a) * d), z = Math.floor(player.pos.z + Math.sin(a) * d);
@@ -439,41 +444,6 @@ async function spawnCharacters() {
     if (ch instanceof BlockyCharacter) ch.setMotions(motions);
     scene.add(ch.root);
     npcs.push(new NPC(ch, world, x + 0.5, y, z + 0.5));
-  }
-  if (motions) stageOpening(motions);
-}
-
-// Opening scene: one NPC waves at you from just ahead, another mines a little further off.
-function stageOpening(motions) {
-  const f = player.forward();
-  // dry ground in the initial view: first hit over these angles (radians off straight ahead) × distances
-  const spot = (angles, dist) => {
-    for (const ang of angles) {
-      const c = Math.cos(ang), s = Math.sin(ang), dx = f.x * c - f.z * s, dz = f.x * s + f.z * c;
-      for (let d = dist; d < dist + 6; d++) {
-        const x = Math.floor(player.pos.x + dx * d), z = Math.floor(player.pos.z + dz * d);
-        const y = world.surfaceY(x, z, 120);
-        if (world.getBlock(x, y, z) === B.WATER || world.getBlock(x, y - 1, z) === B.WATER || Math.abs(y - player.pos.y) > 3) continue;
-        return new THREE.Vector3(x + 0.5, y, z + 0.5);
-      }
-    }
-    return null;
-  };
-  const place = (n, p) => { n.pos.copy(p); n.home.copy(p); n.target = null; };
-  const toPlayer = (p) => Math.atan2(player.pos.x - p.x, player.pos.z - p.z);
-  const [greeter, miner] = npcs;
-  // the greeter wanders like everyone else but waves whenever it spots you; start it nearby
-  const gp = motions.wave && greeter && spot([0, 0.3, -0.3], 4);
-  if (gp) { place(greeter, gp); greeter.yaw = toPlayer(gp); greeter.befriend(); }
-  const mp = motions.mine && miner && spot([0.55, -0.55, 0.3, -0.3, 0.8, -0.8], 7);
-  if (mp) {
-    place(miner, mp); miner.char.holdPickaxe(U); miner.mine(toPlayer(mp) + Math.PI / 2); // side-on to the camera
-    miner.char.onStrike = () => { // chips fly off the block the pickaxe lands on
-      const x = Math.floor(miner.pos.x + Math.sin(miner.yaw)), z = Math.floor(miner.pos.z + Math.cos(miner.yaw));
-      const y = world.surfaceY(x, z, Math.floor(miner.pos.y) + 1) - 1;
-      const b = world.getBlock(x, y, z);
-      if (SOLID[b]) burst(x, y, z, b, 12);
-    };
   }
 }
 
@@ -581,6 +551,7 @@ function frame() {
   avatar.update(dt, player.speed, 0);
   for (const n of npcs) n.update(dt, player.pos, player.locked);
   updateParticles(dt);
+  updateArrows(dt, scene);
 
   // first-person hand
   hand.visible = player.view === 0;

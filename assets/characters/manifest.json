@@ -5,7 +5,15 @@
     "walk": "xbot_walk.glb",
     "run": "xbot_run.glb",
     "wave": "xbot_wave.glb",
-    "mine": { "file": "xbot_mine.glb", "loop": [0.2, 3.67] }
+    "mine": {"file": "xbot_mine.glb", "loop": [0.2, 3.67]},
+    "chop": {"file": "xbot_chop.glb", "loop": [0, 3.53], "strikes": [0.95, 2.55]},
+    "hoe": {"file": "xbot_hoe.glb", "loop": [0.2, 2.33], "strikes": [0.8, 2.05]},
+    "bow": {"file": "xbot_bow.glb", "strikes": [], "events": {"release": 1.85}},
+    "draw": {"file": "xbot_sword_draw.glb", "strikes": [], "events": {"grab": 0.55}},
+    "swordIdle": {"file": "xbot_sword_idle.glb", "strikes": []},
+    "pickup": {"file": "xbot_pickup.glb", "strikes": [], "events": {"grab": 3.7}},
+    "carryWalk": {"file": "xbot_carry_walk.glb", "strikes": []},
+    "carryIdle": {"file": "xbot_carry_idle.glb", "loop": [23.13, 26.87], "strikes": []}
   },
   "characters": []
 }
