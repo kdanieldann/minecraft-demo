@@ -69,7 +69,9 @@ the player starts out facing it. Each villager's job is a different PINOC clip:
 | lumberjack | Axe Chop | chops the nearest tree trunk; chips fly off it |
 | farmer | Hoe Chop | tills a 3×3 dirt patch; each strike kicks up dirt |
 
-Shipped clips, all `skinned-glb`:
+Shipped clips — PINOC `skinned-glb` exports, stripped to skeleton + animation with
+`python3 tools/strip_glb.py <files>` (the bundled X Bot mesh is ~95% of each file and the
+blocky rig never reads it; run it on any clip you add):
 
 | file | source | credits |
 |---|---|---|

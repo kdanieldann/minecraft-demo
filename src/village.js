@@ -34,8 +34,10 @@ export function stageVillage({ world, scene, player, npcs, motions, U, burst }) 
   if (!C) return [];
   const toC = C.clone().sub(P).setY(0), dist = toC.length();
   const f = toC.normalize(), side = V(-f.z, 0, f.x);
-  player.yaw = Math.atan2(-f.x, -f.z);
-  player.pitch = Math.max(-0.45, Math.min(0, Math.atan2(C.y - (P.y + 1.6), dist) + 0.05));
+  if (!player.locked) { // don't yank the camera if they're already playing when the clips arrive
+    player.yaw = Math.atan2(-f.x, -f.z);
+    player.pitch = Math.max(-0.45, Math.min(0, Math.atan2(C.y - (P.y + 1.6), dist) + 0.05));
+  }
 
   const taken = [P.clone()];
   const cell = (x, z) => { const y = groundY(x, z); return dry(x, y, z) && Math.abs(y - C.y) <= 3 ? y : null; };
